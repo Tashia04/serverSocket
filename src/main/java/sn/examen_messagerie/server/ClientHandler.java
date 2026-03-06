@@ -1,8 +1,7 @@
-package main.java.server;
+package sn.examen_messagerie.server;
 
-import main.java.server.Server;
-import main.java.sn.examen_messagerie.entity.ChatMessage;
-//import sn.examen_messagerie.entity.ChatMessage;
+import sn.examen_messagerie.entity.ChatMessage;
+import sn.examen_messagerie.entity.Message;
 import sn.examen_messagerie.entity.MessageStatus;
 import sn.examen_messagerie.entity.User;
 import sn.examen_messagerie.repository.impl.MessageRepository;
@@ -14,9 +13,8 @@ import java.net.Socket;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.logging.Logger;
-import java.util.logging.Level;
 
-// Gère la communication avec un client connecté (un thread par client)
+// Gère la communication avec un client connecté (un thread par client, RG11)
 public class ClientHandler implements Runnable {
 
     private static final Logger LOGGER = Logger.getLogger(ClientHandler.class.getName());
@@ -24,9 +22,9 @@ public class ClientHandler implements Runnable {
     private final Socket socket;
     private final UserService userService;
     private final MessageRepository messageRepository;
-    private String currentUser;          // nom de l'utilisateur connecté
-    private ObjectOutputStream out;      // flux de sortie vers le client
-    private ObjectInputStream in;        // flux d'entrée depuis le client
+    private String currentUser;
+    private ObjectOutputStream out;
+    private ObjectInputStream in;
 
     public ClientHandler(Socket socket, UserService userService) {
         this.socket = socket;
@@ -56,7 +54,7 @@ public class ClientHandler implements Runnable {
                         break;
                     case "logout":
                         handleLogout();
-                        return; // on sort de la boucle et du thread
+                        return;
                     case "send_message":
                         handleSendMessage(request);
                         break;
@@ -74,10 +72,9 @@ public class ClientHandler implements Runnable {
 
         } catch (Exception e) {
             // Perte de connexion du client (RG10)
-            LOGGER.info("[SERVEUR] Connexion perdue avec " +
+            LOGGER.warning("[SERVEUR] Connexion perdue avec " +
                     (currentUser != null ? currentUser : "client inconnu"));
         } finally {
-            // Nettoyage à la déconnexion
             disconnect();
         }
     }
@@ -93,7 +90,7 @@ public class ClientHandler implements Runnable {
             LOGGER.info("[SERVEUR] Inscription réussie : " + username);
             sendResponse("register_response", "OK");
         } else {
-            LOGGER.warning("[SERVEUR] Echec inscription : " + username + " (existe déjà)");
+            LOGGER.info("[SERVEUR] Échec inscription : " + username + " (existe déjà)");
             sendResponse("register_response", "Ce nom d'utilisateur existe déjà");
         }
     }
@@ -113,20 +110,18 @@ public class ClientHandler implements Runnable {
 
         if (success) {
             currentUser = username;
-
-            // Enregistrer ce client dans la liste des connectés
-            Server.connectedClients.put(username,this);
+            Server.connectedClients.put(username, this);
             LOGGER.info("[SERVEUR] Connexion : " + username);
 
             sendResponse("login_response", "OK");
 
-            // RG6 : livrer les messages en attente (reçus pendant que l'utilisateur était hors ligne)
+            // RG6 : livrer les messages en attente
             deliverPendingMessages();
 
             // Informer tous les clients de la mise à jour de la liste
             Server.broadcastUserList();
         } else {
-            LOGGER.warning("[SERVEUR] Echec connexion : " + username);
+            LOGGER.info("[SERVEUR] Échec connexion : " + username);
             sendResponse("login_response", "Identifiants incorrects");
         }
     }
@@ -139,9 +134,9 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // ===================== ENVOI DE MESSAGE (RG5, RG7) =====================
+    // ===================== ENVOI DE MESSAGE (RG2, RG5, RG7) =====================
     private void handleSendMessage(ChatMessage request) {
-        // RG2 : vérifier que l'expéditeur est connecté
+        // RG2 : l'expéditeur doit être authentifié
         if (currentUser == null) {
             sendResponse("error", "Vous devez être connecté pour envoyer un message");
             return;
@@ -150,13 +145,14 @@ public class ClientHandler implements Runnable {
         String receiver = request.getReceiver();
         String content = request.getContenu();
 
-        // RG5 : vérifier que le destinataire existe
-        if (userService.findByUsername(receiver) == null) {
+        // RG5 : le destinataire doit exister
+        User receiverUser = userService.findByUsername(receiver);
+        if (receiverUser == null) {
             sendResponse("error", "L'utilisateur " + receiver + " n'existe pas");
             return;
         }
 
-        // RG7 : valider le contenu du message
+        // RG7 : le contenu ne doit pas être vide ni dépasser 1000 caractères
         if (content == null || content.trim().isEmpty()) {
             sendResponse("error", "Le message ne peut pas être vide");
             return;
@@ -166,81 +162,82 @@ public class ClientHandler implements Runnable {
             return;
         }
 
-        // Créer le message avec le bon expéditeur
-        request.setSender(currentUser);
-        request.setDateEnvoi(LocalDateTime.now());
+        User senderUser = userService.findByUsername(currentUser);
+        LocalDateTime now = LocalDateTime.now();
 
         // Vérifier si le destinataire est en ligne
         ClientHandler receiverHandler = Server.connectedClients.get(receiver);
+        MessageStatus status = (receiverHandler != null) ? MessageStatus.RECU : MessageStatus.ENVOYE;
 
+        // Sauvegarder en base avec les relations @ManyToOne User
+        Message message = new Message(senderUser, receiverUser, content, now, status);
+        messageRepository.save(message);
+
+        // Transférer au destinataire s'il est en ligne
         if (receiverHandler != null) {
-            // Destinataire en ligne : on lui envoie et on marque RECU
-            request.setStatut(MessageStatus.RECU);
-            request.setAction("receive_message");
-            receiverHandler.sendMessage(request);
-        } else {
-            // Destinataire hors ligne : on marque ENVOYE (RG6 : livré plus tard)
-            request.setStatut(MessageStatus.ENVOYE);
+            ChatMessage delivery = new ChatMessage();
+            delivery.setAction("receive_message");
+            delivery.setSender(currentUser);
+            delivery.setReceiver(receiver);
+            delivery.setContenu(content);
+            delivery.setDateEnvoi(now);
+            delivery.setStatut(MessageStatus.RECU);
+            receiverHandler.sendMessage(delivery);
         }
 
-        // Sauvegarder le message en base
-        request.setAction("send_message");
-        messageRepository.save(request);
-
         LOGGER.info("[SERVEUR] Message de " + currentUser + " vers " + receiver);
-
-        // Confirmer l'envoi à l'expéditeur
         sendResponse("message_sent", "OK");
     }
 
     // ===================== LISTE DES UTILISATEURS CONNECTÉS =====================
     private void handleGetUsers() {
         StringBuilder users = new StringBuilder();
-        userService.findOnlineUsers().forEach(user -> {
-            // Cast explicite vers User pour accéder à getUsername()
-            String username = ((User) user).getUsername();
+        for (String username : Server.connectedClients.keySet()) {
             if (!username.equals(currentUser)) {
                 if (users.length() > 0) {
                     users.append(",");
                 }
                 users.append(username);
             }
-        });
+        }
         sendResponse("user_list", users.toString());
     }
 
-    // ===================== HISTORIQUE DES MESSAGES (RG8) =====================
+    // ===================== HISTORIQUE DES MESSAGES (RG2, RG8) =====================
     private void handleGetHistory(ChatMessage request) {
-        String otherUser = request.getReceiver();
+        // RG2 : l'utilisateur doit être authentifié
+        if (currentUser == null) {
+            sendResponse("error", "Vous devez être connecté pour consulter les messages");
+            return;
+        }
 
-        // Récupérer les messages entre les deux utilisateurs, triés par date
-        List<ChatMessage> history = messageRepository.findBetweenUsers(currentUser, otherUser);
+        String otherUser = request.getReceiver();
+        List<Message> history = messageRepository.findBetweenUsers(currentUser, otherUser);
 
         // Envoyer chaque message de l'historique au client
-        for (ChatMessage msg : history) {
+        for (Message msg : history) {
             ChatMessage historyMsg = new ChatMessage();
             historyMsg.setAction("history");
-            historyMsg.setSender(msg.getSender());
-            historyMsg.setReceiver(msg.getReceiver());
+            historyMsg.setSender(msg.getSender().getUsername());
+            historyMsg.setReceiver(msg.getReceiver().getUsername());
             historyMsg.setContenu(msg.getContenu());
             historyMsg.setDateEnvoi(msg.getDateEnvoi());
             historyMsg.setStatut(msg.getStatut());
             sendMessage(historyMsg);
         }
 
-        // Envoyer un marqueur de fin d'historique
         sendResponse("history_end", "OK");
     }
 
     // ===================== LIVRAISON DES MESSAGES EN ATTENTE (RG6) =====================
     private void deliverPendingMessages() {
-        List<ChatMessage> pendingMessages = messageRepository.findPendingForUser(currentUser);
+        List<Message> pendingMessages = messageRepository.findPendingForUser(currentUser);
 
-        for (ChatMessage msg : pendingMessages) {
+        for (Message msg : pendingMessages) {
             ChatMessage delivery = new ChatMessage();
             delivery.setAction("receive_message");
-            delivery.setSender(msg.getSender());
-            delivery.setReceiver(msg.getReceiver());
+            delivery.setSender(msg.getSender().getUsername());
+            delivery.setReceiver(msg.getReceiver().getUsername());
             delivery.setContenu(msg.getContenu());
             delivery.setDateEnvoi(msg.getDateEnvoi());
             delivery.setStatut(MessageStatus.RECU);
@@ -251,7 +248,7 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // ===================== METHODES UTILITAIRES =====================
+    // ===================== MÉTHODES UTILITAIRES =====================
 
     // Envoyer un ChatMessage au client
     public void sendMessage(ChatMessage message) {
@@ -259,8 +256,8 @@ public class ClientHandler implements Runnable {
             out.writeObject(message);
             out.flush();
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "[SERVEUR] Erreur envoi vers " +
-                    (currentUser != null ? currentUser : "inconnu"), e);
+            LOGGER.warning("[SERVEUR] Erreur envoi vers " +
+                    (currentUser != null ? currentUser : "inconnu"));
         }
     }
 

@@ -1,31 +1,19 @@
-package main.java.sn.examen_messagerie.entity;
+package sn.examen_messagerie.entity;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
-/**
- * Entité JPA représentant un message de chat.
- * Sert aussi d'objet échangé sur le réseau (Serializable).
- */
-@Entity
-@Table(name = "messages")
+// Objet protocole réseau pour la communication client-serveur (pas une entité JPA)
 public class ChatMessage implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    private String action;      // action protocolaire (login, send_message, etc.)
-    private String sender;      // expéditeur
-    private String receiver;    // destinataire
-    private String contenu;     // contenu du message
-
-    @Enumerated(EnumType.STRING)
-    private MessageStatus statut;   // statut du message (ENVOYE, RECU, LU)
-
-    private LocalDateTime dateEnvoi; // date d'envoi
+    private String action;
+    private String sender;
+    private String receiver;
+    private String contenu;
+    private MessageStatus statut;
+    private LocalDateTime dateEnvoi;
 
     public ChatMessage() {
     }
@@ -39,13 +27,7 @@ public class ChatMessage implements Serializable {
         this.dateEnvoi = LocalDateTime.now();
     }
 
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
+    // ============ Getters et Setters ============
 
     public String getAction() {
         return action;
@@ -80,7 +62,7 @@ public class ChatMessage implements Serializable {
     }
 
     public MessageStatus getStatut() {
-        return null;
+        return statut;
     }
 
     public void setStatut(MessageStatus statut) {
@@ -94,8 +76,4 @@ public class ChatMessage implements Serializable {
     public void setDateEnvoi(LocalDateTime dateEnvoi) {
         this.dateEnvoi = dateEnvoi;
     }
-
-    public void setStatut(sn.examen_messagerie.entity.MessageStatus messageStatus) {
-    }
 }
-

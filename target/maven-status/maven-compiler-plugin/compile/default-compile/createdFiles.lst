@@ -1,0 +1,11 @@
+sn/examen_messagerie/repository/impl/UserRepository.class
+sn/examen_messagerie/server/ClientHandler.class
+sn/examen_messagerie/entity/ChatMessage.class
+sn/examen_messagerie/server/Server.class
+sn/examen_messagerie/entity/User.class
+sn/examen_messagerie/utils/JPAUtils.class
+sn/examen_messagerie/repository/impl/MessageRepository.class
+sn/examen_messagerie/entity/Message.class
+sn/examen_messagerie/entity/Status.class
+sn/examen_messagerie/entity/MessageStatus.class
+sn/examen_messagerie/service/UserService.class
